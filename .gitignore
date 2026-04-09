@@ -1,0 +1,40 @@
+# Environment & secrets
+.env
+.env.*
+kaggle.json
+*.key
+
+# Data and results (do NOT commit per project rules)
+data/
+results/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# FastF1 cache
+fastf1_cache/
+ff1_cache/
