@@ -22,22 +22,19 @@ At this stage, only the OpenF1 API is fully implemented. Other data sources will
 
 ## Project Structure
 
-
-
+```
 f1-qualifying-prediction/
 ├── src/
-│ ├── init.py
-│ ├── openf1_api.py # OpenF1 API data fetching
-│ ├── load_results.py # Data loading and merging
-│ ├── analysis.py # EDA and regression modeling
-│ └── main.py # Entry point
-├── doc/ # Progress report (PDF)
-├── data/ # Local data (gitignored)
-├── results/ # Output files (gitignored)
-├── tests.py # Test suite
+│   ├── __init__.py
+│   ├── openf1_api.py
+│   ├── load_results.py
+│   ├── analysis.py
+│   └── main.py
+├── doc/
+├── tests.py
 ├── requirements.txt
 └── .gitignore
-
+```
 
 ## Setup
 
