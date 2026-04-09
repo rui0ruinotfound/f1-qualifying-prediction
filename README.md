@@ -31,7 +31,8 @@ f1-qualifying-prediction/
 │   ├── analysis.py
 │   └── main.py
 ├── doc/
-├── tests.py
+│   └── progress_report.pdf   # Progress report
+├── tests.py                 # Test suite
 ├── requirements.txt
 └── .gitignore
 ```
