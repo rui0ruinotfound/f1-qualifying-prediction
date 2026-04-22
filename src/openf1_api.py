@@ -1,43 +1,43 @@
-"""
-Small client for the OpenF1 REST API.
-
-This module provides a lightweight interface for accessing OpenF1 data.
-All requests are handled through a shared helper function, and common
-endpoints are wrapped for convenience.
-
-Example:
-    from src.openf1_api import OpenF1Client
-
-    client = OpenF1Client()
-    sessions = client.get_sessions(year=2024, country_name="Japan")
-    laps = client.get_laps(session_key=9158, driver_number=1)
-"""
-
-from __future__ import annotations
-
-from dataclasses import dataclass
 import json
-from typing import Any
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-
-JsonList = list[dict[str, Any]]
+from config import (
+    MAX_RETRIES,
+    OPENF1_BASE_URL,
+    QUALIFYING_SESSION_NAME,
+    REQUEST_PAUSE_SECONDS,
+    REQUEST_TIMEOUT,
+    RETRY_DELAY_SECONDS,
+)
 
 
 class OpenF1APIError(RuntimeError):
     """Raised when an OpenF1 request fails."""
 
+# AI generated: initial draft of this script was created with the help ofAI assistance
+# and then reviewed and refactored by Rui Chen. The final version was manually edited.
 
-@dataclass(slots=True)
 class OpenF1Client:
-    """Minimal client for the OpenF1 API."""
+    """Small helper class for reading data from the OpenF1 API."""
 
-    base_url: str = "https://api.openf1.org/v1"
-    timeout: float = 30.0
+    def __init__(
+        self,
+        base_url=OPENF1_BASE_URL,
+        timeout=REQUEST_TIMEOUT,
+        pause_seconds=REQUEST_PAUSE_SECONDS,
+        max_retries=MAX_RETRIES,
+        retry_delay=RETRY_DELAY_SECONDS,
+    ):
+        self.base_url = base_url
+        self.timeout = timeout
+        self.pause_seconds = pause_seconds
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
 
-    def _build_url(self, endpoint: str, **params: Any) -> str:
+    def _build_url(self, endpoint, **params):
         clean_endpoint = endpoint.strip("/")
         query_params = {
             key: self._stringify_value(value)
@@ -49,22 +49,30 @@ class OpenF1Client:
         return f"{url}?{query_string}" if query_string else url
 
     @staticmethod
-    def _stringify_value(value: Any) -> Any:
+    def _stringify_value(value):
         if isinstance(value, bool):
             return str(value).lower()
         return value
 
-    def _get(self, endpoint: str, **params: Any) -> JsonList:
+    def _get(self, endpoint, **params):
         url = self._build_url(endpoint, **params)
-        try:
-            with urlopen(url, timeout=self.timeout) as response:
-                payload = response.read().decode("utf-8")
-        except HTTPError as exc:
-            raise OpenF1APIError(
-                f"OpenF1 request failed with status {exc.code}: {url}"
-            ) from exc
-        except URLError as exc:
-            raise OpenF1APIError(f"Could not reach OpenF1 API: {exc.reason}") from exc
+        for attempt in range(self.max_retries + 1):
+            try:
+                with urlopen(url, timeout=self.timeout) as response:
+                    payload = response.read().decode("utf-8")
+                time.sleep(self.pause_seconds)
+                break
+            except HTTPError as exc:
+                if exc.code == 429 and attempt < self.max_retries:
+                    time.sleep(self.retry_delay * (attempt + 1))
+                    continue
+                raise OpenF1APIError(
+                    f"OpenF1 request failed with status {exc.code}: {url}"
+                ) from exc
+            except URLError as exc:
+                raise OpenF1APIError(
+                    f"Could not reach OpenF1 API: {exc.reason}"
+                ) from exc
 
         try:
             data = json.loads(payload)
@@ -77,24 +85,23 @@ class OpenF1Client:
             )
         return data
 
-    def get(self, endpoint: str, **params: Any) -> JsonList:
+    def get(self, endpoint, **params):
         """Fetch any OpenF1 endpoint by path."""
-
         return self._get(endpoint, **params)
 
-    def get_meetings(self, **params: Any) -> JsonList:
+    def get_meetings(self, **params):
         return self._get("meetings", **params)
 
     def get_sessions(
         self,
         *,
-        year: int | None = None,
-        meeting_key: int | None = None,
-        session_key: int | None = None,
-        session_name: str | None = None,
-        country_name: str | None = None,
-        **params: Any,
-    ) -> JsonList:
+        year=None,
+        meeting_key=None,
+        session_key=None,
+        session_name=None,
+        country_name=None,
+        **params,
+    ):
         return self._get(
             "sessions",
             year=year,
@@ -108,12 +115,12 @@ class OpenF1Client:
     def get_drivers(
         self,
         *,
-        session_key: int | None = None,
-        meeting_key: int | None = None,
-        driver_number: int | None = None,
-        team_name: str | None = None,
-        **params: Any,
-    ) -> JsonList:
+        session_key=None,
+        meeting_key=None,
+        driver_number=None,
+        team_name=None,
+        **params,
+    ):
         return self._get(
             "drivers",
             session_key=session_key,
@@ -126,11 +133,11 @@ class OpenF1Client:
     def get_laps(
         self,
         *,
-        session_key: int,
-        driver_number: int | None = None,
-        lap_number: int | None = None,
-        **params: Any,
-    ) -> JsonList:
+        session_key,
+        driver_number=None,
+        lap_number=None,
+        **params,
+    ):
         return self._get(
             "laps",
             session_key=session_key,
@@ -142,12 +149,26 @@ class OpenF1Client:
     def get_position(
         self,
         *,
-        session_key: int,
-        driver_number: int | None = None,
-        **params: Any,
-    ) -> JsonList:
+        session_key,
+        driver_number=None,
+        **params,
+    ):
         return self._get(
-            "position",
+            "positions",
+            session_key=session_key,
+            driver_number=driver_number,
+            **params,
+        )
+
+    def get_session_result(
+        self,
+        *,
+        session_key,
+        driver_number=None,
+        **params,
+    ):
+        return self._get(
+            "session_result",
             session_key=session_key,
             driver_number=driver_number,
             **params,
@@ -156,10 +177,10 @@ class OpenF1Client:
     def get_car_data(
         self,
         *,
-        session_key: int,
-        driver_number: int | None = None,
-        **params: Any,
-    ) -> JsonList:
+        session_key,
+        driver_number=None,
+        **params,
+    ):
         return self._get(
             "car_data",
             session_key=session_key,
@@ -170,10 +191,10 @@ class OpenF1Client:
     def get_pit(
         self,
         *,
-        session_key: int,
-        driver_number: int | None = None,
-        **params: Any,
-    ) -> JsonList:
+        session_key,
+        driver_number=None,
+        **params,
+    ):
         return self._get(
             "pit",
             session_key=session_key,
@@ -181,23 +202,22 @@ class OpenF1Client:
             **params,
         )
 
-    def get_weather(self, *, session_key: int, **params: Any) -> JsonList:
+    def get_weather(self, *, session_key, **params):
         return self._get("weather", session_key=session_key, **params)
 
     def get_qualifying_sessions(
         self,
         *,
-        year: int | None = None,
-        meeting_key: int | None = None,
-        country_name: str | None = None,
-        **params: Any,
-    ) -> JsonList:
-        """Convenience helper for qualifying sessions only."""
-
+        year=None,
+        meeting_key=None,
+        country_name=None,
+        **params,
+    ):
+        """Return only sessions labeled as qualifying sessions."""
         return self.get_sessions(
             year=year,
             meeting_key=meeting_key,
             country_name=country_name,
-            session_name="Qualifying",
+            session_name=QUALIFYING_SESSION_NAME,
             **params,
         )

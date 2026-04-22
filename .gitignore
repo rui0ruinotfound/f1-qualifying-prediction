@@ -1,3 +1,6 @@
+# AI generated: initial draft of this script was created with the help ofAI assistance
+# and then reviewed and refactored by Rui Chen. The final version was manually edited.
+
 # Environment & secrets
 .env
 .env.*
@@ -27,6 +30,7 @@ env/
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
+!src/results.ipynb
 
 # IDE
 .vscode/
