@@ -37,7 +37,7 @@ Results will appear in the `results/` folder. Downloaded or merged data will be 
 ## Project structure
 
 
-
+```
 f1-qualifying-prediction/
 ├── src/
 │ ├── init.py
@@ -51,7 +51,7 @@ f1-qualifying-prediction/
 ├── tests.py # Test suite
 ├── requirements.txt
 └── .gitignore
-
+```
 
 ## Setup
 
