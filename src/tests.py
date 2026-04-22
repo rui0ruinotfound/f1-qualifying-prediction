@@ -1,160 +1,36 @@
-# AI generated: initial draft of this script was created with the help ofAI assistance
-# and then reviewed and refactored by Rui Chen. The final version was manually edited.
 import sys
 
-try:
-    import pandas as pd
-except ModuleNotFoundError:
-    pd = None
+import pandas as pd
 
-try:
-    from analyze import (
-        compute_correlation,
-        pole_to_win_rate,
-        run_linear_regression,
-    )
-    ANALYSIS_IMPORT_ERROR = None
-except ModuleNotFoundError as exc:
-    compute_correlation = None
-    pole_to_win_rate = None
-    run_linear_regression = None
-    ANALYSIS_IMPORT_ERROR = exc
+from analyze import compute_correlation, pole_to_win_rate, run_linear_regression
+from kaggle_loader import load_kaggle_dataset
+from load import load_multiple_seasons
+from openf1_api import OpenF1APIError
+from process import finalize_results
 
-from openf1_api import OpenF1APIError, OpenF1Client
-
-_client = OpenF1Client()
+# AI generated: initial draft of this script was created with the help ofAI assistance
+# and then reviewed and refactored by Rui Chen. The final version was manually edited.
 
 
 class SkipTest(Exception):
-    """Used when a test cannot run in the current environment."""
+    pass
 
 
-def require_pandas():
-    if pd is None:
-        raise SkipTest(
-            "pandas is not installed for this Python interpreter. "
-            "Use the Anaconda Python or install project dependencies first."
-        )
-
-
-def require_analysis_dependencies():
-    require_pandas()
-    if ANALYSIS_IMPORT_ERROR is not None:
-        raise SkipTest(
-            "analysis dependencies are missing for this Python interpreter: "
-            f"{ANALYSIS_IMPORT_ERROR}"
-        )
-
-
-def fetch_2023_race_sessions():
+def test_openf1_load():
+    print("Test 1: load_multiple_seasons([2023])...")
     try:
-        race_sessions = [
-            session
-            for session in _client.get_sessions(year=2023)
-            if session.get("session_name") == "Race"
-        ]
+        df = load_multiple_seasons([2023])
     except OpenF1APIError as exc:
         raise SkipTest(f"OpenF1 API is unavailable: {exc}") from exc
 
-    if not race_sessions:
-        raise SkipTest("No 2023 race sessions were returned by OpenF1.")
-    return race_sessions
-
-
-def test_get_sessions():
-    """Check that the API returns session data for a season."""
-    print("Test 1: get_sessions(year=2023)...")
-    try:
-        sessions = _client.get_sessions(year=2023)
-    except OpenF1APIError as exc:
-        raise SkipTest(f"OpenF1 API is unavailable: {exc}") from exc
-
-    assert isinstance(sessions, list), "Expected a list"
-    assert len(sessions) > 0, "Should have at least one session"
-    assert "session_key" in sessions[0], "Missing 'session_key'"
-    assert "session_name" in sessions[0], "Missing 'session_name'"
-    assert "year" in sessions[0], "Missing 'year'"
-
-    print(f"  PASSED - {len(sessions)} sessions retrieved for 2023")
-
-
-def test_get_qualifying_sessions():
-    """Check that the qualifying-session helper filters correctly."""
-    print("Test 2: get_qualifying_sessions(year=2023)...")
-    try:
-        sessions = _client.get_qualifying_sessions(year=2023)
-    except OpenF1APIError as exc:
-        raise SkipTest(f"OpenF1 API is unavailable: {exc}") from exc
-
-    assert isinstance(sessions, list), "Expected a list"
-    assert len(sessions) > 0, "Should have qualifying sessions"
-    assert all(s.get("session_name") == "Qualifying" for s in sessions), \
-        "All sessions should be Qualifying"
-
-    print(f"  PASSED - {len(sessions)} qualifying sessions found")
-
-
-def test_get_session_result():
-    """Check that session_result data can be fetched for one race session."""
-    print("Test 3: get_session_result() for a 2023 race session...")
-    race_sessions = fetch_2023_race_sessions()
-
-    session_key = race_sessions[0]["session_key"]
-    try:
-        session_results = _client.get_session_result(session_key=session_key)
-    except OpenF1APIError as exc:
-        raise SkipTest(f"OpenF1 API is unavailable: {exc}") from exc
-
-    assert isinstance(session_results, list), "Expected a list"
-    assert len(session_results) > 0, "Session result data should not be empty"
-    assert "driver_number" in session_results[0], "Missing 'driver_number'"
-    assert "position" in session_results[0], "Missing 'position'"
-
-    print(
-        f"  PASSED - {len(session_results)} session result records "
-        f"for session_key={session_key}"
-    )
-
-
-def test_get_drivers():
-    """Check that driver information can be fetched for a session."""
-    print("Test 4: get_drivers() for a 2023 race session...")
-    race_sessions = fetch_2023_race_sessions()
-
-    session_key = race_sessions[0]["session_key"]
-    try:
-        drivers = _client.get_drivers(session_key=session_key)
-    except OpenF1APIError as exc:
-        raise SkipTest(f"OpenF1 API is unavailable: {exc}") from exc
-
-    assert isinstance(drivers, list), "Expected a list"
-    assert len(drivers) > 0, "Drivers list should not be empty"
-    assert "driver_number" in drivers[0], "Missing 'driver_number'"
-
-    print(f"  PASSED - {len(drivers)} drivers found for session_key={session_key}")
-
-
-def test_get_laps():
-    """Check that lap data can be fetched for one driver in a session."""
-    print("Test 5: get_laps() for driver 1 in a 2023 race session...")
-    race_sessions = fetch_2023_race_sessions()
-
-    session_key = race_sessions[0]["session_key"]
-    try:
-        laps = _client.get_laps(session_key=session_key, driver_number=1)
-    except OpenF1APIError as exc:
-        raise SkipTest(f"OpenF1 API is unavailable: {exc}") from exc
-
-    assert isinstance(laps, list), "Expected a list"
-    # Driver 1 may not appear in every session, so the main check is that the request works.
-    print(f"  PASSED - {len(laps)} lap records for driver 1 in session_key={session_key}")
+    assert not df.empty
+    assert "qualifying_position" in df.columns
+    assert "race_position" in df.columns
+    print(f"  PASSED - loaded {len(df)} rows")
 
 
 def test_compute_correlation():
-    """Check correlation on a simple dataset with a perfect relationship."""
-    require_analysis_dependencies()
-
-    print("Test 6: compute_correlation() with synthetic data...")
+    print("Test 2: compute_correlation()...")
     df = pd.DataFrame(
         {
             "qualifying_position": list(range(1, 21)),
@@ -162,15 +38,12 @@ def test_compute_correlation():
         }
     )
     corr = compute_correlation(df)
-    assert abs(corr - 1.0) < 1e-6, f"Expected perfect correlation, got {corr}"
+    assert abs(corr - 1.0) < 1e-6
     print(f"  PASSED - correlation = {corr:.4f}")
 
 
 def test_run_linear_regression():
-    """Check linear regression on a simple dataset with a perfect relationship."""
-    require_analysis_dependencies()
-
-    print("Test 7: run_linear_regression() with synthetic data...")
+    print("Test 3: run_linear_regression()...")
     df = pd.DataFrame(
         {
             "qualifying_position": list(range(1, 21)),
@@ -178,16 +51,13 @@ def test_run_linear_regression():
         }
     )
     results = run_linear_regression(df)
-    assert abs(results["coefficient"] - 1.0) < 0.01, "Coefficient should be ~1.0"
-    assert results["mae"] < 1.0, "MAE should be very low for perfect data"
-    print(f"  PASSED - coefficient={results['coefficient']:.4f}, MAE={results['mae']:.4f}")
+    assert abs(results["coefficient"] - 1.0) < 0.01
+    assert results["mae"] < 1.0
+    print(f"  PASSED - coefficient = {results['coefficient']:.4f}")
 
 
 def test_pole_to_win_rate():
-    """Check pole-to-win rate on a small example with a known answer."""
-    require_analysis_dependencies()
-
-    print("Test 8: pole_to_win_rate()...")
+    print("Test 4: pole_to_win_rate()...")
     df = pd.DataFrame(
         {
             "qualifying_position": [1, 1, 1, 1, 2],
@@ -195,20 +65,46 @@ def test_pole_to_win_rate():
         }
     )
     rate = pole_to_win_rate(df)
-    assert abs(rate - 0.5) < 1e-6, f"Expected 0.5, got {rate}"
+    assert abs(rate - 0.5) < 1e-6
     print(f"  PASSED - pole-to-win rate = {rate:.2%}")
+
+
+def test_finalize_results():
+    print("Test 5: finalize_results()...")
+    df = pd.DataFrame(
+        {
+            "driver_number": ["1", "16"],
+            "qualifying_position": ["1", "2"],
+            "race_position": ["2", "1"],
+            "year": [2024, 2024],
+            "circuit": ["Monza", "Monza"],
+            "meeting_key": ["test_1", "test_1"],
+        }
+    )
+    cleaned = finalize_results(df)
+    assert cleaned["driver_number"].dtype.kind in "iu"
+    assert cleaned["qualifying_position"].dtype.kind in "iu"
+    assert cleaned["race_position"].dtype.kind in "iu"
+    print(f"  PASSED - cleaned {len(cleaned)} rows")
+
+
+def test_kaggle_load():
+    print("Test 6: load_kaggle_dataset([2023, 2024, 2025])...")
+    df = load_kaggle_dataset([2023, 2024, 2025])
+    assert not df.empty
+    assert "qualifying_position" in df.columns
+    assert "race_position" in df.columns
+    print(f"  PASSED - loaded {len(df)} rows")
 
 
 if __name__ == "__main__":
     tests = [
-        test_get_sessions,
-        test_get_qualifying_sessions,
-        test_get_session_result,
-        test_get_drivers,
-        test_get_laps,
+        test_openf1_load,
         test_compute_correlation,
         test_run_linear_regression,
         test_pole_to_win_rate,
+        test_finalize_results,
+        test_kaggle_load,
     ]
 
     passed = 0
@@ -219,17 +115,13 @@ if __name__ == "__main__":
         try:
             test()
             passed += 1
-        except SkipTest as e:
-            print(f"  SKIPPED - {test.__name__}: {e}")
+        except SkipTest as exc:
+            print(f"  SKIPPED - {test.__name__}: {exc}")
             skipped += 1
-        except Exception as e:
-            print(f"  FAILED - {test.__name__}: {e}")
+        except Exception as exc:
+            print(f"  FAILED - {test.__name__}: {exc}")
             failed += 1
 
-    print(f"\n{'='*40}")
-    print(
-        f"Results: {passed} passed, {failed} failed, {skipped} skipped "
-        f"out of {len(tests)} tests"
-    )
-    if failed > 0:
+    print(f"\nResults: {passed} passed, {failed} failed, {skipped} skipped")
+    if failed:
         sys.exit(1)
