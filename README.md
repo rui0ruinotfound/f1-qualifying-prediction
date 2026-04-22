@@ -34,10 +34,16 @@ From the `src/` directory run:
 
 Results will appear in the `results/` folder. Downloaded or merged data will be stored in the `data/` folder.
 
+## AI Usage Disclosure
+
+Generative AI tools were used to assist with portions of this project. Specifically, OpenAI Codex/ChatGPT was used as a coding assistant for selected implementation, debugging, documentation, and configuration support.
+
+All code sections, comments, documentation, or configuration content that were generated with AI should be labeled in the source files with the comment format `# AI generated:` as required by the course policy.
+
 ## Project structure
 
 
-```
+
 f1-qualifying-prediction/
 ├── src/
 │ ├── init.py
