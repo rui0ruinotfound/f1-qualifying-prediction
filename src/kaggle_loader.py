@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 
 from config import KAGGLE_DATA_DIR
-from process import finalize_results
+from process import classify_circuit_type, finalize_results
 
 
 
@@ -59,8 +59,8 @@ def load_kaggle_dataset(years, data_dir=KAGGLE_DATA_DIR):
 
     circuits = pd.DataFrame()
     if (data_dir / "circuits.csv").exists():
-        circuits = pd.read_csv(data_dir / "circuits.csv")
-
+        circuits = pd.read_csv(data_dir / "circuits.csv", encoding="latin1")
+        
     year_column = "year" if "year" in races.columns else "season"
     race_name_column = "name" if "name" in races.columns else "race_name"
     race_id_column = "raceId" if "raceId" in races.columns else "race_id"
@@ -144,11 +144,13 @@ def load_kaggle_dataset(years, data_dir=KAGGLE_DATA_DIR):
         merged.drop(columns=["circuit_name"], inplace=True)
 
     merged["meeting_key"] = merged["race_id"]
+    merged["circuit_type"] = merged[circuit_id_column].map(classify_circuit_type)
 
     keep = [
         "driver_number",
         "qualifying_position",
         "race_position",
+        "circuit_type",
         "full_name",
         "name_acronym",
         "year",

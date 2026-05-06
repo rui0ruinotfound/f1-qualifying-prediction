@@ -2,11 +2,15 @@ import pandas as pd
 
 from config import QUALIFYING_SESSION_NAME, RACE_SESSION_NAME
 from openf1_api import OpenF1APIError, OpenF1Client
-from process import finalize_results, merge_session_results, session_position
+from process import (
+    finalize_results,
+    merge_session_results,
+    pit_stop_counts,
+    session_position,
+)
 
 # AI generated: initial draft of this script was created with the help ofAI assistance
 # and then reviewed and refactored by Rui Chen. The final version was manually edited.
-
 
 def load_season_pairs(year, client=None):
     if client is None:
@@ -61,7 +65,21 @@ def load_season_pairs(year, client=None):
         except OpenF1APIError:
             drivers_df = pd.DataFrame()
 
-        merged = merge_session_results(qual_df, race_df, drivers_df, year, circuit, meeting_key)
+        try:
+            pit_df = pit_stop_counts(client.get_pit(session_key=race["session_key"]))
+        except OpenF1APIError as exc:
+            print(f"  Skipped pit stop feature for {circuit} ({year}): {exc}")
+            pit_df = pd.DataFrame(columns=["driver_number", "pit_stop_count"])
+
+        merged = merge_session_results(
+            qual_df,
+            race_df,
+            drivers_df,
+            year,
+            circuit,
+            meeting_key,
+            pit_df=pit_df,
+        )
         if not merged.empty:
             all_rows.append(merged)
             print(f"  Loaded: {circuit} ({year})")

@@ -1,8 +1,9 @@
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# AI generated: initial draft of this script was created with the help ofAI assistance
+# AI generated: initial draft of this script was created with the help of AI assistance
 # and then reviewed and refactored by Rui Chen. The final version was manually edited.
 
 SRC_DIR = Path(__file__).resolve().parent
@@ -14,7 +15,8 @@ load_dotenv(SRC_DIR / ".env")
 
 DATA_DIR = PROJECT_ROOT / "data"
 RESULTS_DIR = PROJECT_ROOT / "results"
-KAGGLE_DATA_DIR = DATA_DIR / "kaggle"
+KAGGLE_DATA_DIR_VALUE = os.getenv("KAGGLE_DATA_DIR")
+KAGGLE_DATA_DIR = Path(KAGGLE_DATA_DIR_VALUE) if KAGGLE_DATA_DIR_VALUE else DATA_DIR / "kaggle"
 FASTF1_CACHE_DIR = DATA_DIR / "fastf1_cache"
 
 OPENF1_BASE_URL = "https://api.openf1.org/v1"

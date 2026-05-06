@@ -1,13 +1,22 @@
+import os
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import KFold, cross_val_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-# AI generated: initial draft of this script was created with the help of AI assistance
-# and then reviewed and refactored by Rui Chen. The final version was manually edited.
+os.environ.setdefault(
+    "MPLCONFIGDIR",
+    str(Path(__file__).resolve().parents[1] / ".matplotlib_cache"),
+)
+os.environ.setdefault("MPLBACKEND", "Agg")
+
 
 def compute_correlation(df):
     corr = df["qualifying_position"].corr(df["race_position"])
@@ -123,6 +132,477 @@ def save_source_comparison(rows, result_dir, filename):
     comparison_df = pd.DataFrame(rows)
     comparison_df.to_csv(result_dir / filename, index=False)
     return comparison_df
+
+
+def available_model_specs(df):
+    specs = {
+        "Qualifying only": ["qualifying_position"],
+        "Pit stops only": ["pit_stop_count"],
+        "Weather only": ["rainfall", "track_temperature"],
+        "Circuit type only": ["circuit_type"],
+        "Combined": [
+            "qualifying_position",
+            "pit_stop_count",
+            "circuit_type",
+            "rainfall",
+            "track_temperature",
+        ],
+    }
+
+    available_specs = {}
+    for model_name, features in specs.items():
+        available_features = [
+            feature
+            for feature in features
+            if feature in df.columns and df[feature].notna().any()
+        ]
+        if model_name == "Combined":
+            if "qualifying_position" in available_features and len(available_features) > 1:
+                available_specs[model_name] = available_features
+        elif len(available_features) == len(features):
+            available_specs[model_name] = available_features
+
+    return available_specs
+
+
+def _feature_pipeline(df, features):
+    categorical_features = [
+        feature
+        for feature in features
+        if df[feature].dtype == "object" or str(df[feature].dtype) == "category"
+    ]
+    numeric_features = [feature for feature in features if feature not in categorical_features]
+
+    transformers = []
+    if numeric_features:
+        numeric_pipeline = Pipeline(
+            steps=[
+                ("imputer", SimpleImputer(strategy="median")),
+                ("scaler", StandardScaler()),
+            ]
+        )
+        transformers.append(("numeric", numeric_pipeline, numeric_features))
+
+    if categorical_features:
+        categorical_pipeline = Pipeline(
+            steps=[
+                ("imputer", SimpleImputer(strategy="most_frequent")),
+                ("onehot", OneHotEncoder(handle_unknown="ignore")),
+            ]
+        )
+        transformers.append(("categorical", categorical_pipeline, categorical_features))
+
+    preprocessor = ColumnTransformer(transformers=transformers)
+    model = Pipeline(
+        steps=[
+            ("preprocessor", preprocessor),
+            ("regression", LinearRegression()),
+        ]
+    )
+    return model
+
+
+def _feature_names(model, features):
+    preprocessor = model.named_steps["preprocessor"]
+    names = []
+
+    if "numeric" in preprocessor.named_transformers_:
+        names.extend(preprocessor.transformers_[0][2])
+
+    if "categorical" in preprocessor.named_transformers_:
+        categorical_pipeline = preprocessor.named_transformers_["categorical"]
+        onehot = categorical_pipeline.named_steps["onehot"]
+        categorical_features = [
+            feature
+            for name, _, feature in preprocessor.transformers_
+            if name == "categorical"
+            for feature in feature
+        ]
+        names.extend(onehot.get_feature_names_out(categorical_features).tolist())
+
+    return names or features
+
+# AI generated: initial draft of this script was created with the help of AI assistance
+# and then reviewed and refactored by Rui Chen. The final version was manually edited.
+
+def evaluate_regression_model(df, features, model_name):
+    model_df = df[features + ["race_position"]].dropna(subset=["race_position"]).copy()
+    model_df = model_df.dropna(subset=features, how="all")
+
+    x = model_df[features]
+    y = model_df["race_position"]
+
+    model = _feature_pipeline(model_df, features)
+    model.fit(x, y)
+
+    predicted = model.predict(x)
+    mae = mean_absolute_error(y, predicted)
+    rmse = np.sqrt(mean_squared_error(y, predicted))
+    r_squared = r2_score(y, predicted)
+
+    cv_folds = min(5, len(model_df))
+    if cv_folds >= 2:
+        cv = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+        cv_mae = -cross_val_score(
+            model,
+            x,
+            y,
+            cv=cv,
+            scoring="neg_mean_absolute_error",
+        ).mean()
+        cv_rmse = np.sqrt(
+            -cross_val_score(
+                model,
+                x,
+                y,
+                cv=cv,
+                scoring="neg_mean_squared_error",
+            ).mean()
+        )
+    else:
+        cv_mae = np.nan
+        cv_rmse = np.nan
+
+    coefficient_names = _feature_names(model, features)
+    coefficients = model.named_steps["regression"].coef_
+    importance = pd.DataFrame(
+        {
+            "feature": coefficient_names,
+            "coefficient": coefficients,
+            "abs_coefficient": np.abs(coefficients),
+        }
+    ).sort_values("abs_coefficient", ascending=False)
+
+    print(
+        f"{model_name}: R-squared={r_squared:.4f}, MAE={mae:.4f}, "
+        f"RMSE={rmse:.4f}, CV MAE={cv_mae:.4f}, CV RMSE={cv_rmse:.4f}"
+    )
+
+    return {
+        "model_name": model_name,
+        "features": features,
+        "n_observations": len(model_df),
+        "mae": mae,
+        "rmse": rmse,
+        "r_squared": r_squared,
+        "cv_mae": cv_mae,
+        "cv_rmse": cv_rmse,
+        "predicted_values": predicted,
+        "actual_values": y.values,
+        "importance": importance,
+    }
+
+
+def run_feature_model_comparison(df):
+    specs = available_model_specs(df)
+    results = []
+
+    for model_name, features in specs.items():
+        results.append(evaluate_regression_model(df, features, model_name))
+
+    comparison = pd.DataFrame(
+        [
+            {
+                "model": result["model_name"],
+                "features": ", ".join(result["features"]),
+                "n_observations": result["n_observations"],
+                "mae": round(result["mae"], 4),
+                "rmse": round(result["rmse"], 4),
+                "r_squared": round(result["r_squared"], 4),
+                "cv_mae": round(result["cv_mae"], 4),
+                "cv_rmse": round(result["cv_rmse"], 4),
+            }
+            for result in results
+        ]
+    )
+    return comparison, results
+
+
+def feature_correlations(df):
+    features = [
+        feature
+        for feature in [
+            "qualifying_position",
+            "pit_stop_count",
+            "rainfall",
+            "track_temperature",
+            "circuit_type",
+        ]
+        if feature in df.columns and df[feature].notna().any()
+    ]
+    encoded = pd.get_dummies(df[features + ["race_position"]], drop_first=False)
+    return encoded.corr(numeric_only=True)
+
+
+def save_feature_analysis_outputs(comparison_df, model_results, result_dir):
+    result_dir = Path(result_dir)
+    result_dir.mkdir(parents=True, exist_ok=True)
+    comparison_df.to_csv(result_dir / "feature_model_comparison.csv", index=False)
+
+    importance_rows = []
+    for result in model_results:
+        importance = result["importance"].copy()
+        importance.insert(0, "model", result["model_name"])
+        importance_rows.append(importance)
+
+    if importance_rows:
+        importance_df = pd.concat(importance_rows, ignore_index=True)
+        importance_df.to_csv(result_dir / "feature_importance.csv", index=False)
+    else:
+        importance_df = pd.DataFrame()
+
+    return importance_df
+
+
+def plot_feature_analysis(df, comparison_df, model_results, result_dir):
+    result_dir = Path(result_dir)
+    result_dir.mkdir(parents=True, exist_ok=True)
+
+    import matplotlib.pyplot as plt
+
+    corr = feature_correlations(df)
+    plt.figure(figsize=(10, 8))
+    image = plt.imshow(corr, cmap="coolwarm", vmin=-1, vmax=1)
+    plt.colorbar(image, fraction=0.046, pad=0.04)
+    plt.xticks(range(len(corr.columns)), corr.columns, rotation=45, ha="right")
+    plt.yticks(range(len(corr.index)), corr.index)
+    plt.title("Correlation Heatmap for Model Features")
+    plt.tight_layout()
+    plt.savefig(result_dir / "F1_Feature_Correlation_Heatmap.png", bbox_inches="tight")
+    plt.close()
+
+    combined = next(
+        (result for result in model_results if result["model_name"] == "Combined"),
+        model_results[-1] if model_results else None,
+    )
+    if combined is None:
+        return
+
+    importance = combined["importance"].head(10).sort_values("abs_coefficient")
+    plt.figure(figsize=(10, 6))
+    plt.barh(importance["feature"], importance["abs_coefficient"], color="teal")
+    plt.title("Feature Importance in Final Combined Model")
+    plt.xlabel("Absolute coefficient after preprocessing")
+    plt.tight_layout()
+    plt.savefig(result_dir / "F1_Feature_Importance.png", bbox_inches="tight")
+    plt.close()
+
+    actual = combined["actual_values"]
+    predicted = combined["predicted_values"]
+    plt.figure(figsize=(8, 8))
+    plt.scatter(actual, predicted, alpha=0.4, color="darkorange")
+    plt.plot([1, 20], [1, 20], color="black", linestyle="--", linewidth=2)
+    plt.title("Actual vs Predicted Finishing Position - Combined Model")
+    plt.xlabel("Actual finishing position")
+    plt.ylabel("Predicted finishing position")
+    plt.xticks(range(1, 21))
+    plt.yticks(range(1, 21))
+    plt.grid(True)
+    plt.savefig(result_dir / "F1_Combined_Actual_vs_Predicted.png", bbox_inches="tight")
+    plt.close()
+
+    plt.figure(figsize=(10, 6))
+    plt.bar(comparison_df["model"], comparison_df["rmse"], color="slateblue")
+    plt.title("Model RMSE Comparison")
+    plt.ylabel("RMSE")
+    plt.xticks(rotation=30, ha="right")
+    plt.tight_layout()
+    plt.savefig(result_dir / "F1_Model_Comparison_RMSE.png", bbox_inches="tight")
+    plt.close()
+
+
+def plot_individual_feature_charts(df, result_dir):
+    result_dir = Path(result_dir)
+    result_dir.mkdir(parents=True, exist_ok=True)
+
+    import matplotlib.pyplot as plt
+
+    numeric_features = [
+        ("pit_stop_count", "Pit Stops"),
+        ("rainfall", "Rain Flag"),
+        ("track_temperature", "Track Temperature"),
+    ]
+    for feature, label in numeric_features:
+        if feature not in df.columns or not df[feature].notna().any():
+            continue
+
+        plt.figure(figsize=(9, 6))
+        plt.scatter(df[feature], df["race_position"], alpha=0.35)
+        plt.title(f"{label} vs Finishing Position")
+        plt.xlabel(label)
+        plt.ylabel("Finishing position")
+        plt.grid(True)
+        plt.savefig(result_dir / f"F1_{feature}_scatterplot.png", bbox_inches="tight")
+        plt.close()
+
+    if "circuit_type" in df.columns and df["circuit_type"].notna().any():
+        grouped = [
+            group["race_position"].values
+            for _, group in df.dropna(subset=["circuit_type"]).groupby("circuit_type")
+        ]
+        labels = [
+            circuit_type
+            for circuit_type, _ in df.dropna(subset=["circuit_type"]).groupby("circuit_type")
+        ]
+        plt.figure(figsize=(8, 6))
+        plt.boxplot(grouped, tick_labels=labels, patch_artist=True)
+        plt.title("Finishing Position by Circuit Type")
+        plt.xlabel("Circuit type")
+        plt.ylabel("Finishing position")
+        plt.grid(axis="y")
+        plt.savefig(result_dir / "F1_Circuit_Type_boxplot.png", bbox_inches="tight")
+        plt.close()
+
+
+def run_strategy_scenarios(df):
+    features = [
+        "qualifying_position",
+        "pit_stop_count",
+        "circuit_type",
+        "rainfall",
+        "track_temperature",
+    ]
+    available_features = [
+        feature
+        for feature in features
+        if feature in df.columns and df[feature].notna().any()
+    ]
+    if "qualifying_position" not in available_features or len(available_features) < 2:
+        return pd.DataFrame()
+
+    model_df = df[available_features + ["race_position"]].dropna(subset=["race_position"]).copy()
+    model_df = model_df.dropna(subset=available_features, how="all")
+
+    model = _feature_pipeline(model_df, available_features)
+    model.fit(model_df[available_features], model_df["race_position"])
+
+    default_values = {}
+    for feature in available_features:
+        if model_df[feature].dtype == "object" or str(model_df[feature].dtype) == "category":
+            default_values[feature] = model_df[feature].mode().iloc[0]
+        else:
+            default_values[feature] = model_df[feature].median()
+
+    scenarios = [
+        # Tire strategy is a scenario label only. Model inputs remain pit/weather/circuit features
+        # so that actual post-race compound usage is not used as a predictor.
+        {
+            "scenario": "P2 dry race, one stop",
+            "tire_strategy_assumption": "Medium-Hard",
+            "qualifying_position": 2,
+            "pit_stop_count": 1,
+            "rainfall": 0,
+            "circuit_type": "permanent",
+        },
+        {
+            "scenario": "P2 dry race, two stops",
+            "tire_strategy_assumption": "Medium-Hard-Soft",
+            "qualifying_position": 2,
+            "pit_stop_count": 2,
+            "rainfall": 0,
+            "circuit_type": "permanent",
+        },
+        {
+            "scenario": "P10 dry race, one stop",
+            "tire_strategy_assumption": "Hard-Medium",
+            "qualifying_position": 10,
+            "pit_stop_count": 1,
+            "rainfall": 0,
+            "circuit_type": "permanent",
+        },
+        {
+            "scenario": "P10 wet race, two stops",
+            "tire_strategy_assumption": "Intermediate-Medium-Hard",
+            "qualifying_position": 10,
+            "pit_stop_count": 2,
+            "rainfall": 1,
+            "circuit_type": "permanent",
+        },
+        {
+            "scenario": "P5 street circuit, one stop",
+            "tire_strategy_assumption": "Medium-Hard",
+            "qualifying_position": 5,
+            "pit_stop_count": 1,
+            "rainfall": 0,
+            "circuit_type": "street",
+        },
+        {
+            "scenario": "P5 street circuit, three stops",
+            "tire_strategy_assumption": "Soft-Medium-Hard-Soft",
+            "qualifying_position": 5,
+            "pit_stop_count": 3,
+            "rainfall": 0,
+            "circuit_type": "street",
+        },
+        {
+            "scenario": "P6 wet hybrid circuit, two stops",
+            "tire_strategy_assumption": "Intermediate-Medium-Hard",
+            "qualifying_position": 6,
+            "pit_stop_count": 2,
+            "rainfall": 1,
+            "circuit_type": "hybrid",
+        },
+        {
+            "scenario": "P6 wet hybrid circuit, three stops",
+            "tire_strategy_assumption": "Wet-Intermediate-Medium-Hard",
+            "qualifying_position": 6,
+            "pit_stop_count": 3,
+            "rainfall": 1,
+            "circuit_type": "hybrid",
+        },
+    ]
+
+    scenario_df = pd.DataFrame(scenarios)
+    for feature, value in default_values.items():
+        if feature not in scenario_df.columns:
+            scenario_df[feature] = value
+        else:
+            scenario_df[feature] = scenario_df[feature].fillna(value)
+
+    prediction_input = scenario_df[available_features]
+    scenario_df["predicted_finish_position"] = model.predict(prediction_input)
+    scenario_df["predicted_finish_position"] = scenario_df[
+        "predicted_finish_position"
+    ].round(2)
+
+    display_columns = [
+        "scenario",
+        "tire_strategy_assumption",
+    ] + available_features + ["predicted_finish_position"]
+    return scenario_df[display_columns]
+
+
+def save_strategy_scenarios(scenario_df, result_dir):
+    result_dir = Path(result_dir)
+    result_dir.mkdir(parents=True, exist_ok=True)
+    if not scenario_df.empty:
+        scenario_df.to_csv(result_dir / "strategy_scenarios.csv", index=False)
+    return scenario_df
+
+
+def plot_strategy_scenarios(scenario_df, result_dir):
+    if scenario_df.empty:
+        return
+
+    result_dir = Path(result_dir)
+    result_dir.mkdir(parents=True, exist_ok=True)
+
+    import matplotlib.pyplot as plt
+
+    plot_df = scenario_df.sort_values("predicted_finish_position", ascending=False)
+    plt.figure(figsize=(10, 6))
+    plt.barh(
+        plot_df["scenario"],
+        plot_df["predicted_finish_position"],
+        color="seagreen",
+    )
+    plt.title("Strategy Scenario Simulation")
+    plt.xlabel("Predicted finishing position")
+    plt.xlim(1, max(20, plot_df["predicted_finish_position"].max() + 1))
+    plt.grid(axis="x", alpha=0.35)
+    plt.tight_layout()
+    plt.savefig(result_dir / "F1_Strategy_Scenarios.png", bbox_inches="tight")
+    plt.close()
 
 # AI generated: initial draft of this script was created with the help of AI assistance
 # and then reviewed and refactored by Rui Chen. The final version was manually edited.

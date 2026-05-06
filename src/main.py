@@ -4,10 +4,17 @@ from analyze import (
     average_finish_by_grid,
     compute_correlation,
     plot_statistics,
+    plot_feature_analysis,
+    plot_individual_feature_charts,
+    plot_strategy_scenarios,
     pole_to_win_rate,
     run_linear_regression,
+    run_feature_model_comparison,
+    run_strategy_scenarios,
+    save_feature_analysis_outputs,
     save_source_comparison,
     save_summary_table,
+    save_strategy_scenarios,
     summary_statistics,
 )
 from config import (
@@ -18,7 +25,9 @@ from config import (
     SEASONS,
     SOURCE_SUMMARY_FILE,
 )
+from diagnostics import regression_diagnostics
 from fastf1_loader import FastF1DataError, load_fastf1_multiple_seasons
+from feature_sources import enrich_openf1_with_external_features
 from kaggle_loader import KaggleDataError, load_kaggle_dataset
 from load import load_multiple_seasons
 from openf1_api import OpenF1APIError
@@ -29,8 +38,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--source",
-        choices=["openf1", "fastf1", "kaggle", "all"],
-        default="openf1",
+        choices=["openf1", "fastf1", "kaggle", "combined", "all"],
+        default="combined",
     )
     return parser.parse_args()
 
@@ -62,11 +71,30 @@ def analyze_source(source_name, df, data_path, results_path):
     print("\n--- Linear Regression Model ---")
     regression_results = run_linear_regression(df)
 
+    print("\n--- Linear Regression Diagnostics ---")
+    diagnostic_results = regression_diagnostics(df, results_path)
+    print(diagnostic_results.to_string(index=False))
+
     print("\n--- Summary Table ---")
     save_summary_table(df, avg_df, corr, regression_results, results_path)
 
     print("\n--- Visualizations ---")
     plot_statistics(df, avg_df, corr, regression_results, results_path)
+
+    print("\n--- Individual and Combined Feature Models ---")
+    feature_comparison, feature_results = run_feature_model_comparison(df)
+    if not feature_comparison.empty:
+        print(feature_comparison.to_string(index=False))
+        save_feature_analysis_outputs(feature_comparison, feature_results, results_path)
+        plot_individual_feature_charts(df, results_path)
+        plot_feature_analysis(df, feature_comparison, feature_results, results_path)
+
+        print("\n--- Strategy Scenario Simulation ---")
+        scenario_df = run_strategy_scenarios(df)
+        if not scenario_df.empty:
+            print(scenario_df.to_string(index=False))
+            save_strategy_scenarios(scenario_df, results_path)
+            plot_strategy_scenarios(scenario_df, results_path)
 
     return {
         "source": source_name,
@@ -83,6 +111,12 @@ def analyze_source(source_name, df, data_path, results_path):
 def load_source(source_name):
     if source_name == "openf1":
         return load_multiple_seasons(SEASONS)
+    if source_name == "combined":
+        df = load_multiple_seasons(SEASONS)
+        if df.empty:
+            return df
+        print("\nAdding FastF1 weather and Kaggle/Ergast circuit features...")
+        return enrich_openf1_with_external_features(df, SEASONS)
     if source_name == "fastf1":
         return load_fastf1_multiple_seasons(SEASONS)
     if source_name == "kaggle":
@@ -99,12 +133,16 @@ def main():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     print("=" * 60)
-    print("F1 Qualifying Position vs Race Result Analysis")
+    print("F1 Race Result Factor Analysis")
     print(f"Seasons: {SEASONS}")
     print(f"Selected source: {args.source}")
     print("=" * 60)
 
-    source_names = ["openf1", "fastf1", "kaggle"] if args.source == "all" else [args.source]
+    source_names = (
+        ["openf1", "fastf1", "kaggle", "combined"]
+        if args.source == "all"
+        else [args.source]
+    )
     comparison_rows = []
 
     for source_name in source_names:

@@ -1,4 +1,5 @@
 import json
+import socket
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -61,6 +62,11 @@ class OpenF1Client:
                 raise OpenF1APIError(f"OpenF1 request failed with status {exc.code}") from exc
             except URLError as exc:
                 raise OpenF1APIError(f"Could not reach OpenF1 API: {exc.reason}") from exc
+            except (TimeoutError, socket.timeout) as exc:
+                if attempt < self.max_retries:
+                    time.sleep(self.retry_delay * (attempt + 1))
+                    continue
+                raise OpenF1APIError("OpenF1 request timed out") from exc
 
         try:
             data = json.loads(payload)
@@ -109,6 +115,13 @@ class OpenF1Client:
     def get_session_result(self, *, session_key, driver_number=None):
         return self._get(
             "session_result",
+            session_key=session_key,
+            driver_number=driver_number,
+        )
+
+    def get_pit(self, *, session_key, driver_number=None):
+        return self._get(
+            "pit",
             session_key=session_key,
             driver_number=driver_number,
         )
